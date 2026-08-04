@@ -1,0 +1,44 @@
+services:
+  lisa_open_notebook_db:
+    image: surrealdb/surrealdb:v2
+    command:
+      - start
+      - --log
+      - info
+      - --user
+      - ${SURREAL_USER}
+      - --pass
+      - ${SURREAL_PASSWORD}
+      - rocksdb:/mydata/mydatabase.db
+    user: root
+    environment:
+      SURREAL_EXPERIMENTAL_GRAPHQL: "true"
+    volumes:
+      - lisa_open_notebook_surreal:/mydata
+    restart: unless-stopped
+
+  lisa_open_notebook:
+    image: lfnovo/open_notebook:v1-latest
+    depends_on:
+      - lisa_open_notebook_db
+    ports:
+      - "127.0.0.1:8502:8502"
+      - "127.0.0.1:5055:5055"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      OPEN_NOTEBOOK_ENCRYPTION_KEY: ${OPEN_NOTEBOOK_ENCRYPTION_KEY}
+      OPEN_NOTEBOOK_PASSWORD: ${OPEN_NOTEBOOK_PASSWORD}
+      SURREAL_URL: ws://lisa_open_notebook_db:8000/rpc
+      SURREAL_USER: ${SURREAL_USER}
+      SURREAL_PASSWORD: ${SURREAL_PASSWORD}
+      SURREAL_NAMESPACE: open_notebook
+      SURREAL_DATABASE: open_notebook
+      OPEN_NOTEBOOK_WORKER_MAX_TASKS: "1"
+    volumes:
+      - lisa_open_notebook_data:/app/data
+    restart: unless-stopped
+
+volumes:
+  lisa_open_notebook_surreal:
+  lisa_open_notebook_data:
