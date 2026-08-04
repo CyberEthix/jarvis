@@ -22,12 +22,14 @@ fi
 export PYTHONPATH="$REPO_ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
 export LISA_OLLAMA_MODEL="${LISA_OLLAMA_MODEL:-gemma4:e2b}"
 export LISA_UI_PORT="${LISA_UI_PORT:-8090}"
+export LISA_OPEN_NOTEBOOK_URL="${LISA_OPEN_NOTEBOOK_URL:-http://127.0.0.1:5055}"
 
-# Preserve any incompatible legacy registry tables before creating the
+# Preserve incompatible legacy registry tables before creating the
 # authoritative 2030 registry schema. This is idempotent and does not delete data.
 python -m lisa_runtime.compat_migrate
 
 # Idempotent 2026-2030 foundation bootstrap.
 python -m lisa_runtime.future_core --bootstrap
 
-python -m lisa_runtime.cognition_app
+# Notebook is the outer human workflow; cognition remains the mind-map layer.
+python -m lisa_runtime.notebook_app
