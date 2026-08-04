@@ -33,6 +33,9 @@ class IdleResearchLoopManager:
     4. When the queue is clear and the curiosity interval is due, create and
        manage one self-directed research project.
 
+    When Self Curiosity is off, the service only publishes a paused heartbeat.
+    It does not change job state or execute work.
+
     The loop never auto-restarts failed or stale jobs. Restart is a visible,
     explicit user action. Once restarted, the job becomes READY and may be
     executed by this loop during the next idle window.
@@ -111,7 +114,9 @@ class IdleResearchLoopManager:
 
     def _run_one_queued_job(self) -> IdleTickResult:
         orchestrator = CognitiveOrchestrator(repository=self.repo, node=self.node)
-        self.control.add_event('idle_job_execution', 'started', {'origin': 'queued_or_restarted'})
+        self.control.add_event(
+            'idle_job_execution', 'started', {'origin': 'queued_or_restarted'}
+        )
         try:
             completed_id = orchestrator.run_one_research_cycle()
             if completed_id is None:
@@ -140,9 +145,26 @@ class IdleResearchLoopManager:
             return IdleTickResult('busy', 'Another idle-loop tick is already active.')
 
         try:
+            enabled = bool(policy.get('enabled', False))
+            idle_seconds = self.control.idle_seconds()
+            idle_required = int(policy.get('idle_minutes', 5)) * 60
+            status_payload = {
+                'enabled': enabled,
+                'idle_seconds': int(idle_seconds),
+                'idle_required_seconds': idle_required,
+                'state': 'paused' if not enabled else 'monitoring',
+                'last_tick_at': datetime.now(UTC).isoformat(),
+                'stale_jobs_marked': [],
+            }
+
+            if not enabled:
+                self.control.update_service_status(**status_payload)
+                return IdleTickResult('disabled', 'Self Curiosity is off.')
+
             stale_ids = self.repo.mark_stale_jobs(
                 int(policy.get('stale_job_minutes', 20)) * 60
             )
+            status_payload['stale_jobs_marked'] = stale_ids
             for job_id in stale_ids:
                 self.store.add_thought(
                     'stale_job_detected',
@@ -159,21 +181,6 @@ class IdleResearchLoopManager:
                     research_job_id=job_id,
                 )
 
-            enabled = bool(policy.get('enabled', False))
-            idle_seconds = self.control.idle_seconds()
-            idle_required = int(policy.get('idle_minutes', 5)) * 60
-            status_payload = {
-                'enabled': enabled,
-                'idle_seconds': int(idle_seconds),
-                'idle_required_seconds': idle_required,
-                'state': 'paused' if not enabled else 'monitoring',
-                'last_tick_at': datetime.now(UTC).isoformat(),
-                'stale_jobs_marked': stale_ids,
-            }
-
-            if not enabled:
-                self.control.update_service_status(**status_payload)
-                return IdleTickResult('disabled', 'Self Curiosity is off.')
             if self.repo.has_running_job():
                 status_payload['state'] = 'work_active'
                 self.control.update_service_status(**status_payload)
