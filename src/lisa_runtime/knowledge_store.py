@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 from uuid import uuid4
+
 from .models import utc_now
 
 SCHEMA = """
@@ -33,7 +34,23 @@ CREATE TABLE IF NOT EXISTS knowledge_artifacts (
  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_artifacts_job ON knowledge_artifacts(research_job_id, updated_at DESC);
+CREATE TABLE IF NOT EXISTS runtime_settings (
+ key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS curiosity_runs (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ started_at TEXT NOT NULL,
+ completed_at TEXT,
+ status TEXT NOT NULL,
+ source_summary TEXT NOT NULL DEFAULT '',
+ proposed_question TEXT NOT NULL DEFAULT '',
+ research_job_id INTEGER,
+ decision_json TEXT NOT NULL DEFAULT '{}',
+ error TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_curiosity_runs_started ON curiosity_runs(started_at DESC);
 """
+
 
 class KnowledgeStore:
     def __init__(self, path: str | Path) -> None:
@@ -65,9 +82,12 @@ class KnowledgeStore:
 
     def update_conversation(self, conversation_id: str, *, title: str | None = None, archived: bool | None = None) -> None:
         fields, values = [], []
-        if title is not None: fields += ['title=?']; values += [title]
-        if archived is not None: fields += ['archived=?']; values += [int(archived)]
-        if not fields: return
+        if title is not None:
+            fields += ['title=?']; values += [title]
+        if archived is not None:
+            fields += ['archived=?']; values += [int(archived)]
+        if not fields:
+            return
         fields += ['updated_at=?']; values += [utc_now(), conversation_id]
         with self.connect() as db:
             db.execute(f"UPDATE conversations SET {', '.join(fields)} WHERE id=?", values)
@@ -78,14 +98,21 @@ class KnowledgeStore:
 
     def add_message(self, conversation_id: str, role: str, content: str, metadata: dict | None = None) -> int:
         with self.connect() as db:
-            cur = db.execute('INSERT INTO messages(conversation_id,role,content,created_at,metadata_json) VALUES(?,?,?,?,?)',
-                (conversation_id, role, content, utc_now(), json.dumps(metadata or {}, ensure_ascii=False)))
+            cur = db.execute(
+                'INSERT INTO messages(conversation_id,role,content,created_at,metadata_json) VALUES(?,?,?,?,?)',
+                (conversation_id, role, content, utc_now(), json.dumps(metadata or {}, ensure_ascii=False)),
+            )
             db.execute('UPDATE conversations SET updated_at=? WHERE id=?', (utc_now(), conversation_id))
             return int(cur.lastrowid)
 
     def list_messages(self, conversation_id: str) -> list[dict[str, Any]]:
         with self.connect() as db:
             return [dict(r) for r in db.execute('SELECT * FROM messages WHERE conversation_id=? ORDER BY id', (conversation_id,)).fetchall()]
+
+    def list_recent_messages(self, limit: int = 40) -> list[dict[str, Any]]:
+        with self.connect() as db:
+            rows = db.execute('SELECT * FROM messages ORDER BY id DESC LIMIT ?', (limit,)).fetchall()
+            return [dict(r) for r in reversed(rows)]
 
     def update_message(self, message_id: int, content: str) -> None:
         with self.connect() as db:
@@ -98,9 +125,11 @@ class KnowledgeStore:
     def add_thought(self, stage: str, title: str, content: str, *, conversation_id: str | None = None,
                     research_job_id: int | None = None, status: str = 'recorded', metadata: dict | None = None) -> int:
         with self.connect() as db:
-            cur = db.execute('''INSERT INTO thought_events(conversation_id,research_job_id,stage,title,content,status,created_at,metadata_json)
-                VALUES(?,?,?,?,?,?,?,?)''', (conversation_id, research_job_id, stage, title, content, status, utc_now(),
-                json.dumps(metadata or {}, ensure_ascii=False)))
+            cur = db.execute(
+                '''INSERT INTO thought_events(conversation_id,research_job_id,stage,title,content,status,created_at,metadata_json)
+                VALUES(?,?,?,?,?,?,?,?)''',
+                (conversation_id, research_job_id, stage, title, content, status, utc_now(), json.dumps(metadata or {}, ensure_ascii=False)),
+            )
             return int(cur.lastrowid)
 
     def list_thoughts(self, research_job_id: int | None = None, limit: int = 500) -> list[dict[str, Any]]:
@@ -115,12 +144,17 @@ class KnowledgeStore:
                       conversation_id: str | None = None, metadata: dict | None = None) -> int:
         now = utc_now()
         with self.connect() as db:
-            existing = db.execute('''SELECT id,version FROM knowledge_artifacts WHERE artifact_type=? AND title=?
-                AND research_job_id IS ? ORDER BY version DESC LIMIT 1''', (artifact_type, title, research_job_id)).fetchone()
+            existing = db.execute(
+                '''SELECT id,version FROM knowledge_artifacts WHERE artifact_type=? AND title=?
+                AND research_job_id IS ? ORDER BY version DESC LIMIT 1''',
+                (artifact_type, title, research_job_id),
+            ).fetchone()
             version = int(existing['version']) + 1 if existing else 1
-            cur = db.execute('''INSERT INTO knowledge_artifacts(artifact_type,title,body,research_job_id,conversation_id,version,created_at,updated_at,metadata_json)
-                VALUES(?,?,?,?,?,?,?,?,?)''', (artifact_type, title, body, research_job_id, conversation_id, version, now, now,
-                json.dumps(metadata or {}, ensure_ascii=False)))
+            cur = db.execute(
+                '''INSERT INTO knowledge_artifacts(artifact_type,title,body,research_job_id,conversation_id,version,created_at,updated_at,metadata_json)
+                VALUES(?,?,?,?,?,?,?,?,?)''',
+                (artifact_type, title, body, research_job_id, conversation_id, version, now, now, json.dumps(metadata or {}, ensure_ascii=False)),
+            )
             return int(cur.lastrowid)
 
     def list_artifacts(self, research_job_id: int | None = None) -> list[dict[str, Any]]:
@@ -138,9 +172,12 @@ class KnowledgeStore:
 
     def update_artifact(self, artifact_id: int, *, title: str | None = None, body: str | None = None) -> None:
         fields, values = [], []
-        if title is not None: fields += ['title=?']; values += [title]
-        if body is not None: fields += ['body=?']; values += [body]
-        if not fields: return
+        if title is not None:
+            fields += ['title=?']; values += [title]
+        if body is not None:
+            fields += ['body=?']; values += [body]
+        if not fields:
+            return
         fields += ['updated_at=?']; values += [utc_now(), artifact_id]
         with self.connect() as db:
             db.execute(f"UPDATE knowledge_artifacts SET {', '.join(fields)} WHERE id=?", values)
@@ -148,3 +185,45 @@ class KnowledgeStore:
     def delete_artifact(self, artifact_id: int) -> None:
         with self.connect() as db:
             db.execute('DELETE FROM knowledge_artifacts WHERE id=?', (artifact_id,))
+
+    def set_setting(self, key: str, value: Any) -> None:
+        with self.connect() as db:
+            db.execute(
+                '''INSERT INTO runtime_settings(key,value_json,updated_at) VALUES(?,?,?)
+                ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at''',
+                (key, json.dumps(value, ensure_ascii=False), utc_now()),
+            )
+
+    def get_setting(self, key: str, default: Any = None) -> Any:
+        with self.connect() as db:
+            row = db.execute('SELECT value_json FROM runtime_settings WHERE key=?', (key,)).fetchone()
+        if row is None:
+            return default
+        try:
+            return json.loads(row['value_json'])
+        except Exception:
+            return default
+
+    def start_curiosity_run(self, source_summary: str) -> int:
+        with self.connect() as db:
+            cur = db.execute(
+                'INSERT INTO curiosity_runs(started_at,status,source_summary) VALUES(?,?,?)',
+                (utc_now(), 'running', source_summary),
+            )
+            return int(cur.lastrowid)
+
+    def finish_curiosity_run(self, run_id: int, *, status: str, proposed_question: str = '',
+                             research_job_id: int | None = None, decision: dict | None = None,
+                             error: str = '') -> None:
+        with self.connect() as db:
+            db.execute(
+                '''UPDATE curiosity_runs SET completed_at=?,status=?,proposed_question=?,research_job_id=?,decision_json=?,error=?
+                WHERE id=?''',
+                (utc_now(), status, proposed_question, research_job_id,
+                 json.dumps(decision or {}, ensure_ascii=False), error[:4000], run_id),
+            )
+
+    def list_curiosity_runs(self, limit: int = 100) -> list[dict[str, Any]]:
+        with self.connect() as db:
+            rows = db.execute('SELECT * FROM curiosity_runs ORDER BY id DESC LIMIT ?', (limit,)).fetchall()
+            return [dict(r) for r in rows]
