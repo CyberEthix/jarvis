@@ -62,11 +62,7 @@ class CuriosityWorkspace(base.Workspace):
         self.curiosity.set_enabled(enabled)
         self.refresh_curiosity_ui()
         if enabled:
-            ui.notify(
-                'Self Curiosity enabled. Local, bounded, non-destructive unattended discovery is active.',
-                type='positive',
-                timeout=6000,
-            )
+            ui.notify('Self Curiosity enabled. Local, bounded, non-destructive unattended discovery is active.', type='positive', timeout=6000)
         else:
             ui.notify('Self Curiosity paused. No new unattended cycles will start.', type='warning')
 
@@ -108,25 +104,13 @@ class CuriosityWorkspace(base.Workspace):
             return
         rows: list[dict[str, Any]] = []
         for run in base.store.list_curiosity_runs(limit=100):
-            rows.append({
-                'id': run.get('id'),
-                'status': run.get('status'),
-                'question': run.get('proposed_question') or '',
-                'job': run.get('research_job_id') or '',
-                'started': run.get('started_at'),
-                'completed': run.get('completed_at') or '',
-            })
+            rows.append({'id': run.get('id'), 'status': run.get('status'), 'question': run.get('proposed_question') or '', 'job': run.get('research_job_id') or '', 'started': run.get('started_at'), 'completed': run.get('completed_at') or ''})
         self.curiosity_runs_table.rows = rows
         self.curiosity_runs_table.update()
 
     def save_curiosity_policy(self, interval: Any, daily_limit: Any, auto_execute: bool) -> None:
         try:
-            self.curiosity.update_policy(
-                interval_minutes=int(interval),
-                max_runs_per_day=int(daily_limit),
-                auto_execute_research=bool(auto_execute),
-                local_only=True,
-            )
+            self.curiosity.update_policy(interval_minutes=int(interval), max_runs_per_day=int(daily_limit), auto_execute_research=bool(auto_execute), local_only=True)
             ui.notify('Self Curiosity policy saved.', type='positive')
             self.refresh_curiosity_ui()
         except Exception as exc:
@@ -147,87 +131,52 @@ class CuriosityWorkspace(base.Workspace):
                     ui.space()
                     self.curiosity_badge = ui.badge('ACTIVE' if self._enabled() else 'PAUSED')
                     ui.button(icon='close', on_click=self.curiosity_dialog.close).props('flat round')
-
                 with ui.row().classes('w-full gap-4 p-4 items-stretch'):
                     with ui.card().classes('lisa-card flex-1'):
                         ui.label('Operating Boundary').classes('text-h6')
-                        ui.markdown(
-                            '**Allowed:** inspect local persisted conversations and artifacts; propose one grounded question; '
-                            'queue and optionally execute one bounded local research cycle; save the proposal, report, and audit record.\n\n'
-                            '**Prohibited:** shell commands, file deletion, system changes, software installation, purchases, '
-                            'communications, credential access, surveillance, external side effects, recursive job spawning, '
-                            'or unbounded loops.'
-                        )
+                        ui.markdown('**Allowed:** inspect local persisted conversations and artifacts; propose one grounded question; queue and optionally execute one bounded local research cycle; save the proposal, report, and audit record.\n\n**Prohibited:** shell commands, file deletion, system changes, software installation, purchases, communications, credential access, surveillance, external side effects, recursive job spawning, or unbounded loops.')
                     with ui.card().classes('lisa-card w-[420px]'):
                         ui.label('Main Control').classes('text-h6')
-                        ui.button(self._control_text(), icon='psychology', on_click=self.toggle_curiosity).props(
-                            f"color={self._control_color()} unelevated size=lg"
-                        ).classes('w-full')
+                        ui.button(self._control_text(), icon='psychology', on_click=self.toggle_curiosity).props(f"color={self._control_color()} unelevated size=lg").classes('w-full')
                         self.curiosity_next_label = ui.label(f'Next cycle: {self.curiosity.next_run_text()}').classes('lisa-muted')
                         self.curiosity_run_label = ui.label('Loading cycle history...').classes('text-caption')
                         ui.button('Run One Safe Cycle Now', icon='play_arrow', on_click=self.run_curiosity_now).props('outline').classes('w-full')
-
                 with ui.card().classes('lisa-card mx-4'):
                     ui.label('Governed Schedule').classes('text-h6')
                     with ui.row().classes('w-full items-end gap-4'):
                         interval = ui.number('Interval (minutes)', value=int(policy['interval_minutes']), min=5, max=1440, step=5)
                         daily = ui.number('Maximum cycles per day', value=int(policy['max_runs_per_day']), min=1, max=48, step=1)
                         auto = ui.switch('Automatically execute bounded local research', value=bool(policy['auto_execute_research']))
-                        ui.button(
-                            'Save Policy',
-                            icon='save',
-                            on_click=lambda: self.save_curiosity_policy(interval.value, daily.value, auto.value),
-                        )
-
+                        ui.button('Save Policy', icon='save', on_click=lambda: self.save_curiosity_policy(interval.value, daily.value, auto.value))
                 with ui.card().classes('lisa-card m-4 flex-1'):
                     with ui.row().classes('w-full items-center'):
                         ui.label('Unattended Cycle Audit').classes('text-h6')
-                        ui.space()
-                        ui.button(icon='refresh', on_click=self.refresh_curiosity_runs).props('flat round')
-                    self.curiosity_runs_table = ui.table(
-                        columns=[
-                            {'name':'id','label':'Run','field':'id','sortable':True},
-                            {'name':'status','label':'Status','field':'status','sortable':True},
-                            {'name':'question','label':'Proposed Question','field':'question','align':'left'},
-                            {'name':'job','label':'Research Job','field':'job'},
-                            {'name':'started','label':'Started','field':'started','sortable':True},
-                            {'name':'completed','label':'Completed','field':'completed'},
-                        ],
-                        rows=[], row_key='id', pagination=20,
-                    ).classes('w-full')
+                        ui.space(); ui.button(icon='refresh', on_click=self.refresh_curiosity_runs).props('flat round')
+                    self.curiosity_runs_table = ui.table(columns=[
+                        {'name':'id','label':'Run','field':'id','sortable':True}, {'name':'status','label':'Status','field':'status','sortable':True},
+                        {'name':'question','label':'Proposed Question','field':'question','align':'left'}, {'name':'job','label':'Research Job','field':'job'},
+                        {'name':'started','label':'Started','field':'started','sortable':True}, {'name':'completed','label':'Completed','field':'completed'},
+                    ], rows=[], row_key='id', pagination=20).classes('w-full')
         self.refresh_curiosity_ui()
 
     def build(self) -> None:
         super().build()
-
-        with ui.page_sticky(position='top-right', x_offset=110, y_offset=76):
-            with ui.row().classes('items-center gap-2 bg-[#18222d] border border-[#2a3b4c] rounded-lg p-2 shadow-lg'):
-                self.curiosity_button = ui.button(
-                    self._control_text(),
-                    icon='psychology',
-                    on_click=self.toggle_curiosity,
-                ).props(f"color={self._control_color()} unelevated")
-                ui.button(icon='tune', on_click=self.show_curiosity_console).props('flat round').tooltip('Self Curiosity controls and audit')
-
+        with ui.teleport('.q-drawer .q-drawer__content'):
+            ui.separator().classes('mt-3')
+            with ui.column().classes('w-full p-3 gap-2'):
+                ui.label('SELF CURIOSITY').classes('text-overline lisa-muted')
+                self.curiosity_button = ui.button(self._control_text(), icon='psychology', on_click=self.toggle_curiosity).props(f"color={self._control_color()} unelevated").classes('w-full')
+                ui.button('Controls & Audit', icon='tune', on_click=self.show_curiosity_console).props('flat').classes('w-full')
         self.build_curiosity_console()
         self.refresh_curiosity_ui()
         ui.timer(15.0, self.curiosity_tick)
 
 
-# The page function registered by nicegui_app resolves this module global at request time.
 base.workspace = CuriosityWorkspace()
 
 
 def main() -> None:
-    ui.run(
-        title='LISA Cognitive Research Workspace',
-        host='127.0.0.1',
-        port=int(os.getenv('LISA_UI_PORT', '8090')),
-        reload=False,
-        show=True,
-        dark=True,
-        favicon='🜂',
-    )
+    ui.run(title='LISA Cognitive Research Workspace', host='127.0.0.1', port=int(os.getenv('LISA_UI_PORT', '8090')), reload=False, show=True, dark=True, favicon='🜂')
 
 
 if __name__ in {'__main__', '__mp_main__'}:
