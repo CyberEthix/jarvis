@@ -23,6 +23,7 @@ export PYTHONPATH="$REPO_ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
 export LISA_OLLAMA_MODEL="${LISA_OLLAMA_MODEL:-gemma4:e2b}"
 export LISA_UI_PORT="${LISA_UI_PORT:-8090}"
 export LISA_OPEN_NOTEBOOK_URL="${LISA_OPEN_NOTEBOOK_URL:-http://127.0.0.1:5055}"
+export LISA_IDLE_POLL_SECONDS="${LISA_IDLE_POLL_SECONDS:-15}"
 
 OPEN_NOTEBOOK_ENV="${XDG_CONFIG_HOME:-$HOME/.config}/lisa/open-notebook.env"
 if [ -f "$OPEN_NOTEBOOK_ENV" ]; then
@@ -40,5 +41,29 @@ python -m lisa_runtime.compat_migrate
 # Idempotent 2026-2030 foundation bootstrap.
 python -m lisa_runtime.future_core --bootstrap
 
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/lisa-runtime"
+PID_FILE="$STATE_DIR/idle-loop.pid"
+LOG_FILE="$STATE_DIR/idle-loop.log"
+mkdir -p "$STATE_DIR"
+
+IDLE_RUNNING=0
+if [ -f "$PID_FILE" ]; then
+  IDLE_PID="$(cat "$PID_FILE" 2>/dev/null || true)"
+  if [ -n "$IDLE_PID" ] && kill -0 "$IDLE_PID" 2>/dev/null; then
+    IDLE_RUNNING=1
+    echo "LISA idle research service already running (PID $IDLE_PID)."
+  else
+    rm -f "$PID_FILE"
+  fi
+fi
+
+if [ "$IDLE_RUNNING" -eq 0 ]; then
+  nohup python -m lisa_runtime.idle_loop_service >> "$LOG_FILE" 2>&1 &
+  IDLE_PID=$!
+  echo "$IDLE_PID" > "$PID_FILE"
+  echo "Started LISA idle research service (PID $IDLE_PID)."
+  echo "Idle service log: $LOG_FILE"
+fi
+
 # Notebook is the outer human workflow; cognition remains the mind-map layer.
-python -m lisa_runtime.notebook_app
+python -m lisa_runtime.idle_app
