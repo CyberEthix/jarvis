@@ -24,6 +24,15 @@ export LISA_OLLAMA_MODEL="${LISA_OLLAMA_MODEL:-gemma4:e2b}"
 export LISA_UI_PORT="${LISA_UI_PORT:-8090}"
 export LISA_OPEN_NOTEBOOK_URL="${LISA_OPEN_NOTEBOOK_URL:-http://127.0.0.1:5055}"
 
+OPEN_NOTEBOOK_ENV="${XDG_CONFIG_HOME:-$HOME/.config}/lisa/open-notebook.env"
+if [ -f "$OPEN_NOTEBOOK_ENV" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$OPEN_NOTEBOOK_ENV"
+  set +a
+  export LISA_OPEN_NOTEBOOK_PASSWORD="${LISA_OPEN_NOTEBOOK_PASSWORD:-${OPEN_NOTEBOOK_PASSWORD:-}}"
+fi
+
 # Preserve incompatible legacy registry tables before creating the
 # authoritative 2030 registry schema. This is idempotent and does not delete data.
 python -m lisa_runtime.compat_migrate
