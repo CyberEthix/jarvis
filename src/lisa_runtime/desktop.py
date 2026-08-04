@@ -1,4 +1,4 @@
-"""PySide6 text-first desktop interface with live task KPIs."""
+"""PySide6 text-first desktop interface with thread-safe live task KPIs."""
 
 from __future__ import annotations
 
@@ -46,21 +46,29 @@ class TaskThread(QThread):
 
 
 class LisaWindow(QMainWindow):
+    state_event = Signal(object, str)
+    progress_event = Signal(dict)
+
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("LISA Local Cognitive Runtime")
         self.resize(1180, 780)
 
-        db_path = Path(os.getenv("LISA_RUNTIME_DB", "~/.local/share/lisa-runtime/lisa_runtime.db")).expanduser()
+        db_path = Path(
+            os.getenv("LISA_RUNTIME_DB", "~/.local/share/lisa-runtime/lisa_runtime.db")
+        ).expanduser()
         endpoint = os.getenv("LISA_OLLAMA_ENDPOINT", "http://127.0.0.1:11434")
         model = os.getenv("LISA_OLLAMA_MODEL", "gemma4:e2b")
+
+        self.state_event.connect(self._apply_state)
+        self.progress_event.connect(self._apply_progress)
 
         self.repository = SQLiteRepository(db_path)
         self.orchestrator = CognitiveOrchestrator(
             repository=self.repository,
             node=OllamaNode(endpoint=endpoint, model=model),
-            state_listener=self._on_state,
-            progress_listener=self._on_progress,
+            state_listener=lambda state, detail: self.state_event.emit(state, detail),
+            progress_listener=lambda payload: self.progress_event.emit(dict(payload)),
         )
         self.worker: TaskThread | None = None
 
@@ -70,14 +78,14 @@ class LisaWindow(QMainWindow):
         self.progress_bar.setValue(0)
         self.progress_bar.setFormat("No active task")
 
-        self.kpi_stage = self._make_kpi("Stage", "Idle")
-        self.kpi_progress = self._make_kpi("Progress", "0%")
-        self.kpi_steps = self._make_kpi("Steps", "0 / 0")
-        self.kpi_elapsed = self._make_kpi("Elapsed", "0.0 s")
-        self.kpi_queue = self._make_kpi("Queued", "0")
-        self.kpi_complete = self._make_kpi("Completed", "0")
-        self.kpi_failed = self._make_kpi("Failed", "0")
-        self.kpi_model = self._make_kpi("Model", model)
+        self.kpi_stage, self.kpi_stage_value = self._make_kpi("Stage", "Idle")
+        self.kpi_progress, self.kpi_progress_value = self._make_kpi("Progress", "0%")
+        self.kpi_steps, self.kpi_steps_value = self._make_kpi("Steps", "0 / 0")
+        self.kpi_elapsed, self.kpi_elapsed_value = self._make_kpi("Elapsed", "0.0 s")
+        self.kpi_queue, self.kpi_queue_value = self._make_kpi("Queued", "0")
+        self.kpi_complete, self.kpi_complete_value = self._make_kpi("Completed", "0")
+        self.kpi_failed, self.kpi_failed_value = self._make_kpi("Failed", "0")
+        self.kpi_model, self.kpi_model_value = self._make_kpi("Model", model)
 
         self.chat_view = QTextEdit()
         self.chat_view.setReadOnly(True)
@@ -95,8 +103,16 @@ class LisaWindow(QMainWindow):
 
         kpi_panel = QWidget()
         kpi_layout = QGridLayout(kpi_panel)
-        cards = [self.kpi_stage, self.kpi_progress, self.kpi_steps, self.kpi_elapsed,
-                 self.kpi_queue, self.kpi_complete, self.kpi_failed, self.kpi_model]
+        cards = [
+            self.kpi_stage,
+            self.kpi_progress,
+            self.kpi_steps,
+            self.kpi_elapsed,
+            self.kpi_queue,
+            self.kpi_complete,
+            self.kpi_failed,
+            self.kpi_model,
+        ]
         for index, card in enumerate(cards):
             kpi_layout.addWidget(card, index // 4, index % 4)
 
@@ -129,23 +145,18 @@ class LisaWindow(QMainWindow):
         self.setCentralWidget(central)
         self._refresh_jobs()
 
-    def _make_kpi(self, title: str, value: str) -> QWidget:
+    def _make_kpi(self, title: str, value: str) -> tuple[QWidget, QLabel]:
         card = QWidget()
         layout = QVBoxLayout(card)
         title_label = QLabel(title)
         value_label = QLabel(value)
         value_label.setStyleSheet("font-size: 20px; font-weight: 700;")
-        card.setProperty("value_label", value_label)
-        card.setStyleSheet("QWidget { border: 1px solid #555; border-radius: 6px; padding: 4px; }")
+        card.setStyleSheet(
+            "QWidget { border: 1px solid #555; border-radius: 6px; padding: 4px; }"
+        )
         layout.addWidget(title_label)
         layout.addWidget(value_label)
-        return card
-
-    @staticmethod
-    def _set_kpi(card: QWidget, value: str) -> None:
-        label = card.property("value_label")
-        if isinstance(label, QLabel):
-            label.setText(value)
+        return card, value_label
 
     def _set_busy(self, busy: bool) -> None:
         self.send_button.setEnabled(not busy)
@@ -169,8 +180,10 @@ class LisaWindow(QMainWindow):
             return
         self.input_box.clear()
         self.chat_view.append(f"<b>Charles:</b> {message}")
-        self._run_task(lambda: self.orchestrator.chat(message),
-                       lambda response: self.chat_view.append(f"<b>LISA:</b> {response}"))
+        self._run_task(
+            lambda: self.orchestrator.chat(message),
+            lambda response: self.chat_view.append(f"<b>LISA:</b> {response}"),
+        )
 
     def _queue_research(self) -> None:
         question = self.input_box.text().strip()
@@ -183,8 +196,10 @@ class LisaWindow(QMainWindow):
         self._refresh_jobs()
 
     def _run_research(self) -> None:
-        self._run_task(self.orchestrator.run_one_research_cycle,
-                       lambda job_id: self._research_finished(job_id))
+        self._run_task(
+            self.orchestrator.run_one_research_cycle,
+            lambda job_id: self._research_finished(job_id),
+        )
 
     def _research_finished(self, job_id: int | None) -> None:
         if job_id is None:
@@ -201,14 +216,16 @@ class LisaWindow(QMainWindow):
         for job in jobs:
             self.jobs_list.addItem(f"#{job['id']} [{job['status']}] {job['question']}")
         statuses = [str(job.get("status", "")).upper() for job in jobs]
-        self._set_kpi(self.kpi_queue, str(sum(s in {"NEW", "READY", "QUEUED"} for s in statuses)))
-        self._set_kpi(self.kpi_complete, str(sum(s == "COMPLETED" for s in statuses)))
-        self._set_kpi(self.kpi_failed, str(sum(s == "FAILED" for s in statuses)))
+        self.kpi_queue_value.setText(
+            str(sum(s in {"NEW", "READY", "QUEUED"} for s in statuses))
+        )
+        self.kpi_complete_value.setText(str(sum(s == "COMPLETED" for s in statuses)))
+        self.kpi_failed_value.setText(str(sum(s == "FAILED" for s in statuses)))
 
-    def _on_state(self, state: RuntimeState, detail: str) -> None:
+    def _apply_state(self, state: RuntimeState, detail: str) -> None:
         self.status_label.setText(f"{state.value} — {detail}")
 
-    def _on_progress(self, payload: dict) -> None:
+    def _apply_progress(self, payload: dict) -> None:
         stage = str(payload.get("stage", "idle")).replace("_", " ").title()
         percent = int(payload.get("percent", 0) or 0)
         current_step = int(payload.get("current_step", 0) or 0)
@@ -216,10 +233,10 @@ class LisaWindow(QMainWindow):
         elapsed = float(payload.get("elapsed", 0.0) or 0.0)
         self.progress_bar.setValue(max(0, min(100, percent)))
         self.progress_bar.setFormat(f"{stage}: {percent}%")
-        self._set_kpi(self.kpi_stage, stage)
-        self._set_kpi(self.kpi_progress, f"{percent}%")
-        self._set_kpi(self.kpi_steps, f"{current_step} / {total_steps}")
-        self._set_kpi(self.kpi_elapsed, f"{elapsed:.1f} s")
+        self.kpi_stage_value.setText(stage)
+        self.kpi_progress_value.setText(f"{percent}%")
+        self.kpi_steps_value.setText(f"{current_step} / {total_steps}")
+        self.kpi_elapsed_value.setText(f"{elapsed:.1f} s")
         if stage in {"Complete", "Failed", "Queued", "Idle"}:
             self._refresh_jobs()
 
