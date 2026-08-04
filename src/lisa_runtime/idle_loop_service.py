@@ -9,10 +9,14 @@ from pathlib import Path
 
 from .idle_loop_manager import IdleResearchLoopManager
 from .knowledge_store import KnowledgeStore
-from .nicegui_app import DB_PATH, ENDPOINT, MODEL
 from .ollama_node import OllamaNode
 from .repository import SQLiteRepository
 
+DB_PATH = Path(
+    os.getenv('LISA_RUNTIME_DB', '~/.local/share/lisa-runtime/lisa_runtime.db')
+).expanduser()
+MODEL = os.getenv('LISA_OLLAMA_MODEL', 'gemma4:e2b')
+ENDPOINT = os.getenv('LISA_OLLAMA_ENDPOINT', 'http://127.0.0.1:11434')
 POLL_SECONDS = max(5, int(os.getenv('LISA_IDLE_POLL_SECONDS', '15')))
 LOCK_PATH = Path(
     os.getenv('LISA_IDLE_LOCK', '~/.local/share/lisa-runtime/idle-loop-service.lock')
