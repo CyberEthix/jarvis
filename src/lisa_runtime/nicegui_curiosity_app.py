@@ -7,6 +7,8 @@ from typing import Any
 
 from nicegui import ui
 
+# Import the mind-map extension first so it patches the base Workspace class.
+from . import mindmap_app as _mindmap_app  # noqa: F401
 from . import nicegui_app as base
 from .curiosity_manager import SelfCuriosityManager
 
@@ -119,7 +121,7 @@ class CuriosityWorkspace(base.Workspace):
 
     def save_curiosity_policy(self, interval: Any, daily_limit: Any, auto_execute: bool) -> None:
         try:
-            policy = self.curiosity.update_policy(
+            self.curiosity.update_policy(
                 interval_minutes=int(interval),
                 max_runs_per_day=int(daily_limit),
                 auto_execute_research=bool(auto_execute),
@@ -198,7 +200,6 @@ class CuriosityWorkspace(base.Workspace):
     def build(self) -> None:
         super().build()
 
-        # A persistent, prominent control remains visible on every workspace page.
         with ui.page_sticky(position='top-right', x_offset=110, y_offset=76):
             with ui.row().classes('items-center gap-2 bg-[#18222d] border border-[#2a3b4c] rounded-lg p-2 shadow-lg'):
                 self.curiosity_button = ui.button(
