@@ -56,10 +56,14 @@ class ResearchJob:
     status: JobStatus = JobStatus.NEW
     id: int | None = None
     attempts: int = 0
+    run_generation: int = 1
+    restart_count: int = 0
     created_at: str = field(default_factory=utc_now)
     started_at: str | None = None
     completed_at: str | None = None
     heartbeat_at: str | None = None
+    last_restarted_at: str | None = None
+    restart_reason: str | None = None
     error: str | None = None
 
 
