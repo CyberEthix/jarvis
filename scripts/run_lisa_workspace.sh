@@ -22,4 +22,11 @@ fi
 export PYTHONPATH="$REPO_ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
 export LISA_OLLAMA_MODEL="${LISA_OLLAMA_MODEL:-gemma4:e2b}"
 export LISA_UI_PORT="${LISA_UI_PORT:-8090}"
+
+# Idempotent 2026-2030 foundation bootstrap. This creates/updates the durable
+# task, cognition graph, evidence, governance, memory, node, model, tool and
+# evaluation structures before the UI starts. It also publishes the current
+# readiness inventory into the Research Library.
+python -m lisa_runtime.future_core --bootstrap
+
 python -m lisa_runtime.cognition_app
