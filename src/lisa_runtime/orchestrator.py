@@ -1,4 +1,4 @@
-"""Bounded text-first cognitive orchestration."""
+"""Bounded text-first cognitive orchestration with observable progress events."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from .repository import SQLiteRepository
 
 
 StateListener = Callable[[RuntimeState, str], None]
+ProgressListener = Callable[[dict], None]
 
 
 @dataclass(slots=True)
@@ -20,18 +21,26 @@ class CognitiveOrchestrator:
     repository: SQLiteRepository
     node: OllamaNode
     state_listener: StateListener | None = None
+    progress_listener: ProgressListener | None = None
 
     def _state(self, state: RuntimeState, detail: str = "") -> None:
         if self.state_listener:
             self.state_listener(state, detail)
 
+    def _progress(self, **payload) -> None:
+        if self.progress_listener:
+            self.progress_listener(payload)
+
     def chat(self, message: str) -> str:
         text = message.strip()
         if not text:
             return ""
+        started = time.monotonic()
         self._state(RuntimeState.UNDERSTANDING, "Processing text input")
+        self._progress(kind="chat", stage="understanding", percent=20, elapsed=0.0)
         try:
             self._state(RuntimeState.RESPONDING, "Generating local response")
+            self._progress(kind="chat", stage="generating", percent=55, elapsed=time.monotonic() - started)
             response = self.node.generate(
                 text,
                 system=(
@@ -40,6 +49,7 @@ class CognitiveOrchestrator:
                     "and never claim an action occurred unless it actually did."
                 ),
             )
+            self._progress(kind="chat", stage="complete", percent=100, elapsed=time.monotonic() - started)
             return response
         finally:
             self._state(RuntimeState.IDLE, "Ready")
@@ -48,34 +58,96 @@ class CognitiveOrchestrator:
         job = ResearchJob(question=question.strip(), rationale=rationale)
         job_id = self.repository.create_job(job)
         self._state(RuntimeState.RESEARCH_QUEUED, f"Research job {job_id} queued")
+        self._progress(kind="research", job_id=job_id, stage="queued", percent=0, current_step=0, total_steps=job.max_iterations)
         return job_id
 
     def run_one_research_cycle(self) -> int | None:
         job = self.repository.claim_next_job()
         if job is None or job.id is None:
             self._state(RuntimeState.IDLE, "No research jobs queued")
+            self._progress(kind="research", stage="idle", percent=0)
             return None
 
         self._state(RuntimeState.RESEARCHING, f"Running job {job.id}")
         started = time.monotonic()
         findings: list[dict] = []
+        self._progress(
+            kind="research",
+            job_id=job.id,
+            stage="planning",
+            percent=5,
+            current_step=0,
+            total_steps=job.max_iterations,
+            elapsed=0.0,
+        )
 
         try:
             plan = self._create_plan(job)
+            total_steps = max(1, min(len(plan), job.max_iterations))
+            self._progress(
+                kind="research",
+                job_id=job.id,
+                stage="plan_ready",
+                percent=10,
+                current_step=0,
+                total_steps=total_steps,
+                elapsed=time.monotonic() - started,
+            )
+
             for iteration, action in enumerate(plan[: job.max_iterations], start=1):
                 if time.monotonic() - started >= job.max_runtime_seconds:
                     findings.append({"type": "limit", "message": "Runtime limit reached"})
+                    self._progress(
+                        kind="research",
+                        job_id=job.id,
+                        stage="runtime_limit",
+                        percent=min(90, 10 + int((iteration - 1) / total_steps * 75)),
+                        current_step=iteration - 1,
+                        total_steps=total_steps,
+                        elapsed=time.monotonic() - started,
+                    )
                     break
+
+                percent = 10 + int(((iteration - 1) / total_steps) * 75)
+                self._progress(
+                    kind="research",
+                    job_id=job.id,
+                    stage=str(action.get("action", "analyze")),
+                    percent=percent,
+                    current_step=iteration,
+                    total_steps=total_steps,
+                    elapsed=time.monotonic() - started,
+                    detail=str(action.get("query", "")),
+                )
 
                 result = self._execute_action(job, action)
                 self.repository.save_step(job.id, iteration, action, result)
                 self.repository.heartbeat(job.id)
                 findings.append(result)
 
+                self._progress(
+                    kind="research",
+                    job_id=job.id,
+                    stage="step_complete",
+                    percent=10 + int((iteration / total_steps) * 75),
+                    current_step=iteration,
+                    total_steps=total_steps,
+                    elapsed=time.monotonic() - started,
+                )
+
                 if result.get("complete") is True:
                     break
 
             self._state(RuntimeState.CONSOLIDATING, f"Consolidating job {job.id}")
+            self._progress(
+                kind="research",
+                job_id=job.id,
+                stage="consolidating",
+                percent=90,
+                current_step=len(findings),
+                total_steps=total_steps,
+                elapsed=time.monotonic() - started,
+            )
             summary = self._synthesize(job, findings)
             self.repository.complete_job(
                 job.id,
@@ -86,11 +158,28 @@ class CognitiveOrchestrator:
                     "External evidence tools are not yet connected."
                 ),
             )
+            self._progress(
+                kind="research",
+                job_id=job.id,
+                stage="complete",
+                percent=100,
+                current_step=total_steps,
+                total_steps=total_steps,
+                elapsed=time.monotonic() - started,
+            )
             return job.id
         except Exception as exc:
             retry = job.attempts < job.max_retries
             self.repository.fail_job(job.id, str(exc), retry=retry)
             self._state(RuntimeState.ERROR, f"Job {job.id} failed: {exc}")
+            self._progress(
+                kind="research",
+                job_id=job.id,
+                stage="failed",
+                percent=0,
+                elapsed=time.monotonic() - started,
+                error=str(exc),
+            )
             raise
         finally:
             self._state(RuntimeState.IDLE, "Ready")
