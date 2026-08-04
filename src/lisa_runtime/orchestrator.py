@@ -121,7 +121,13 @@ class CognitiveOrchestrator:
                 )
 
                 result = self._execute_action(job, action)
-                self.repository.save_step(job.id, iteration, action, result)
+                self.repository.save_step(
+                    job.id,
+                    iteration,
+                    action,
+                    result,
+                    run_generation=job.run_generation,
+                )
                 self.repository.heartbeat(job.id)
                 findings.append(result)
 
