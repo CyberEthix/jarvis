@@ -56,7 +56,7 @@ class LisaWindow(QMainWindow):
             )
         ).expanduser()
         endpoint = os.getenv("LISA_OLLAMA_ENDPOINT", "http://127.0.0.1:11434")
-        model = os.getenv("LISA_OLLAMA_MODEL", "qwen3:8b")
+        model = os.getenv("LISA_OLLAMA_MODEL", "gemma4:e2b")
 
         self.repository = SQLiteRepository(db_path)
         self.orchestrator = CognitiveOrchestrator(
@@ -66,7 +66,7 @@ class LisaWindow(QMainWindow):
         )
         self.worker: TaskThread | None = None
 
-        self.status_label = QLabel("IDLE — Ready")
+        self.status_label = QLabel(f"IDLE — Ready | Model: {model}")
         self.chat_view = QTextEdit()
         self.chat_view.setReadOnly(True)
         self.input_box = QLineEdit()
