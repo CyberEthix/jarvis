@@ -1,7 +1,9 @@
 """Compatibility migrations for evolving LISA runtime schemas.
 
-Preserves incompatible legacy tables by renaming them before the 2030 core
-creates its authoritative registry structures. Safe and idempotent.
+Preserves incompatible legacy registry tables before the 2030 core creates its
+authoritative structures. The migration checks both columns and foreign-key
+targets because SQLite rewrites dependent foreign keys when a referenced table
+is renamed. Safe and idempotent.
 """
 from __future__ import annotations
 
@@ -28,6 +30,10 @@ EXPECTED: dict[str, set[str]] = {
     },
 }
 
+EXPECTED_FOREIGN_KEYS: dict[str, dict[str, str]] = {
+    'model_registry': {'node_id': 'node_registry'},
+}
+
 
 def table_exists(db: sqlite3.Connection, name: str) -> bool:
     row = db.execute(
@@ -40,6 +46,14 @@ def columns(db: sqlite3.Connection, name: str) -> set[str]:
     return {str(row[1]) for row in db.execute(f'PRAGMA table_info("{name}")').fetchall()}
 
 
+def foreign_keys(db: sqlite3.Connection, name: str) -> dict[str, str]:
+    """Return {local_column: referenced_table} for a table."""
+    return {
+        str(row[3]): str(row[2])
+        for row in db.execute(f'PRAGMA foreign_key_list("{name}")').fetchall()
+    }
+
+
 def next_legacy_name(db: sqlite3.Connection, base: str) -> str:
     candidate = f'{base}_legacy'
     counter = 1
@@ -49,23 +63,44 @@ def next_legacy_name(db: sqlite3.Connection, base: str) -> str:
     return candidate
 
 
+def incompatible_reason(db: sqlite3.Connection, table: str, required: set[str]) -> str | None:
+    actual = columns(db, table)
+    missing = required - actual
+    if missing:
+        return f'missing columns: {", ".join(sorted(missing))}'
+
+    expected_fks = EXPECTED_FOREIGN_KEYS.get(table, {})
+    actual_fks = foreign_keys(db, table)
+    mismatches = [
+        f'{column}->{actual_fks.get(column, "none")} (expected {target})'
+        for column, target in expected_fks.items()
+        if actual_fks.get(column) != target
+    ]
+    if mismatches:
+        return 'foreign key mismatch: ' + '; '.join(mismatches)
+    return None
+
+
 def migrate() -> list[str]:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     actions: list[str] = []
     with sqlite3.connect(DB_PATH, timeout=30) as db:
         db.execute('PRAGMA foreign_keys=OFF')
         db.execute('PRAGMA busy_timeout=5000')
-        for table, required in EXPECTED.items():
+
+        # Evaluate in dependency order: preserve the parent first, then inspect
+        # dependent tables for foreign keys SQLite may have retargeted.
+        for table in ('node_registry', 'model_registry', 'tool_registry'):
+            required = EXPECTED[table]
             if not table_exists(db, table):
                 continue
-            actual = columns(db, table)
-            if required.issubset(actual):
+            reason = incompatible_reason(db, table, required)
+            if reason is None:
                 continue
             legacy = next_legacy_name(db, table)
             db.execute(f'ALTER TABLE "{table}" RENAME TO "{legacy}"')
-            actions.append(
-                f'{table} -> {legacy} (legacy columns: {", ".join(sorted(actual))})'
-            )
+            actions.append(f'{table} -> {legacy} ({reason})')
+
         db.commit()
     return actions
 
